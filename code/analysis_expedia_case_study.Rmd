@@ -1,0 +1,336 @@
+---
+title: "Expedia case study"
+author: "Joan Biel"
+date: "`r Sys.Date()`"
+output: html_document
+runtime: shiny
+---
+<!--
+rmarkdown::run("analysis_expedia_case_study.Rmd", shiny_args = list(port = 8080,launch.browser =FALSE))
+app.files <- list('analysis_expedia_case_study.Rmd', 'www/expedia_casestudy_20170127.csv',"www/aggregates.rda","www/bookings_fit.rda")
+shinyapps::deployApp(appFiles=app.files,appName='expedia_case_study',account="jibietr",launch.browser =FALSE)
+-->
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+library(plyr)
+library(reshape)
+```
+
+
+### Basic statistics
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+PATH <- "www/"
+fname <- paste(PATH,'expedia_casestudy_20170127.csv',sep='')
+bookings <- read.csv(fname,sep=",",header=TRUE,fill=TRUE)
+colnames(bookings) <- c("partner_id","mkt","bkg_value")
+bookings$bkg_id <- seq(nrow(bookings))
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+load(file="www/aggregates.rda")
+```
+
+
+
+#### Total number of bookings in data
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+nrow(bookings)
+```
+
+#### Num partners
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+partners <- levels(aggr.prt.mkt$partner_id)
+length(partners)
+```
+#### Num markets
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+markets <- levels(aggr.prt.mkt$mkt)
+length(markets)
+```
+
+#### Booking value
+
+Basic stats of booking value:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+summary(bookings$bkg_value)
+```
+
+As shown in the figure below, the distribution of bookings value is bimodal in the log scale.
+This seems to indicate two different type of bookings or booking value groups.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(bookings,aes(x=log10(bkg_value)))+geom_histogram() + ylab("# bookings") + xlab("booking value (in log10)")
+```
+
+We can fit a univariate mixture of 2 gaussian components with variable variance
+to identify the two modals in the booking value:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+library(mclust)
+# fix a univariate mixture of 2 components and variable variance
+#mod = densityMclust(log10(bookings$bkg_value+1e-15),2)
+load(file="www/bookings_fit.rda")
+plot(mod, what = "density", data = log10(bookings$bkg_value), breaks = 15,xlab="bkg_value (log10)",xlim=c(-6,1))
+# I can use this to classify
+bookings$class <- mod$classification
+```
+
+As a result, modal 1 has mean =`r mod$parameters$mean[1]` and SD = `r mod$parameters$variance$sigmasq[1]`,
+whereas modal 2 has a mean `r mod$parameters$mean[2]` and SD = `r mod$parameters$variance$sigmasq[2]` (in the log scale).
+In the linear scale, this correspond to means of `r 10^mod$parameters$mean[1]` and `r 10^mod$parameters$mean[2]` respectively,
+i.e. a difference of two orders of magnitude.
+
+**Note:** the mean statistic of 0.259 for the booking value (show above) comes roughly from averaging the two peaks
+(this happens when the area under the curve of each model is similar).
+
+### PART 1. Market analysis.
+
+
+#### Volume vs Value
+
+* Figure below shows the number of bookings vs the market value for each partner and market pair.
+
+* There is a linear relationship between the demand/size of market (in number of bookings) and
+the total market value generated (for some markets, these two metrics of market performance are non-linear).
+In the next sections, we will use total value as market performance measure.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.prt.mkt,aes(x=num_bkgs,y=tot_prt_mkt_bkg_value))+geom_point() + xlab("Num bookings in market") + ylab("Partner's market value")  
+```
+
+#### Distribution of total booking value per market
+
+* Distribution of total booking per value is right-tailed (see left plot below). Some markets concentrate a large number of total booking values. At the right, same plot in log axis.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.mkt,aes(x=tot_mkt_bkg_value))+geom_histogram() + ylab("# mkt") + xlab("total booking value")  
+ggplot(aggr.mkt,aes(x=log10(tot_mkt_bkg_value)))+geom_histogram() + ylab("# mkt") + xlab("total booking value (log10)")  
+```
+
+* Basic statistics of the total value per market:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+summary(aggr.mkt$tot_mkt_bkg_value)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+aggr.mkt <- arrange(aggr.mkt ,desc(tot_mkt_bkg_value))
+aggr.mkt$per_tot_mkt_bkg_value <- cumsum(aggr.mkt$tot_mkt_bkg_value)/sum(aggr.mkt$tot_mkt_bkg_value)
+aggr.mkt$id <- seq(nrow(aggr.mkt))
+num.top.markets <- sum(aggr.mkt$per_tot_mkt_bkg_value<.50)
+```
+
+As shown in the cumulative distribution below, `r num.top.markets` markets concentrate 25\% of the value generated to Expedia:
+
+> **Result:** `r num.top.markets` markets concentrate 50\% of the value generated to Expedia:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.mkt, aes(x=id,y=per_tot_mkt_bkg_value)) + geom_point() + xlab("mkts") + ylab("% total booking value")
+```
+
+#### Distribution of partners per market
+
+Figure below shows the distribution of partners per market.
+Distribution is right-tailed. In average, there are `r mean(aggr.mkt$num_partners)` partners competing
+in a market.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.mkt,aes(x=num_partners))+geom_histogram() + ylab("# mkt") + xlab("# partners")
+summary(aggr.mkt$num_partners)
+```
+
+### PART 2: Partner analysis.
+
+#### Markets per partner
+
+Figure below shows the distribution of markets per partner. Distribution is right-tailed. In average, a partner is present in `r mean(aggr.prt$num_markets)` markets.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.prt,aes(x=num_markets))+geom_histogram() + ylab("# partners") + xlab("# markets")  
+summary(aggr.prt$num_markets)
+```
+
+#### Total booking value per partner
+
+* Figure below shows thd distribution of total booking per value is right-tailed (some partners accumulate large booking value).
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.prt,aes(x=tot_prt_bkg_value))+geom_histogram() + ylab("# partners") + xlab("total booking value")  
+ggplot(aggr.prt,aes(x=log10(tot_prt_bkg_value)))+geom_histogram() + ylab("# partners") + xlab("total booking value (log10)")  
+```
+
+Basic stats of the total value per partner:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+summary(aggr.prt$tot_prt_bkg_value)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+aggr.prt <- arrange(aggr.prt ,desc(tot_prt_bkg_value))
+aggr.prt$per_tot_prt_bkg_value <- cumsum(aggr.prt$tot_prt_bkg_value)/sum(aggr.prt$tot_prt_bkg_value)
+aggr.prt$id <- seq(nrow(aggr.prt))
+num.top.partners<- sum(aggr.prt$per_tot_prt_bkg_value<.80)
+top.partners50 <- sum(aggr.prt$per_tot_prt_bkg_value<.50)
+```
+
+As shown in the cumulative distribution below, `r top.partners50` partners and  `r num.top.partners` partners concentrate 50\% and 80\% respectively of the value generated to Expedia.
+
+> **Result:** `r top.partners50` partners and  `r num.top.partners` partners concentrate 50\% and 80\% respectively of the value generated to Expedia
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.prt, aes(x=id,y=per_tot_prt_bkg_value)) + geom_point() + xlab("# partners") + ylab("% total booking value")
+```
+
+#### Volume, value and competition
+
+Figure below shows the relationship between the volume of the market (x-axis) and number of partners (y-axis)
+for each market. The size of points is proportional to market size.
+Figure shows that larger markets (mostly above 5000 bookings) attract a high number of partners.
+As we will see in the next section, this does not mean that all these partners are actually generating revenue.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
+# for each partner, check the actual number of
+ggplot(aggr.mkt, aes(y=num_partners,x=num_bkgs)) + geom_point(aes(size=tot_mkt_bkg_value)) + ylab("# partners") + xlab("num bookings")
+```
+
+### PART 3. Market vs Partners:
+
+#### In a given market, how many partners are generating a substantial booking value?
+
+Figure below shows the proportion of *top partners* (partners contributing to to 80\% of the revenue in the market),
+with respect to the the actual number of competing partners in a market (*num partners*) for the top 20 markets.
+This figure clearly shows that the number of partners contributing to the market booking value is sensibly smaller than the overall number of partners competing in the market.
+We can also see that 10 of these top 20 markets, have less 10 or less partners making a significant amount of money.
+These means that certain partners are doing particularly well in these markets.
+
+> **Result**: number of partners contributing to the market booking value is sensibly smaller than the overall number of partners competing in the market.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=5.2, fig.height=4}
+# select top 20 markets
+top20.mkts <- arrange(aggr.mkt,desc(tot_mkt_bkg_value))$mkt[seq(20)]
+
+top20.aggr.prt.mkt <- aggr.prt.mkt[aggr.prt.mkt$mkt %in% top20.mkts,]
+
+top20stats <- ddply(top20.aggr.prt.mkt,.(mkt),function(df){
+  df <- arrange(df ,desc(mkt_share))
+  df$cum_mkt_share <- cumsum(df$mkt_share)
+  top_partners <- length(which(df$cum_mkt_share<0.8))
+  if(top_partners==0) top_partners <- 1
+  num_partners <- nrow(df)
+  total_mkt_bkg_value <- sum(df$tot_prt_mkt_bkg_value)
+  data.frame(num_partners,top_partners,total_mkt_bkg_value)
+})
+ggplot(top20stats,aes(x=num_partners,y=top_partners))+geom_point(aes(size=total_mkt_bkg_value)) + xlab("# total partners") + ylab("# top partners")
+
+```
+
+#### How many markets are actually contributing to partner's revenue?
+
+Similarly to the result above, figure below shows the proportion of *top markets* (market contributing to to 80\% of the revenue for a partner),
+with respect to the the actual number of competing partners in a market (*num partners*) for the top 10 markets.
+Again, the number of markets contributing to the partners booking value is sensibly smaller than the overall number of markets.
+
+> **Result**: only a subset of the markets in which a partner is presentc create value for the partner.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=5.2, fig.height=4}
+# select top 20 markets
+top10.prt <- arrange(aggr.prt ,desc(tot_prt_bkg_value))$partner_id[seq(10)]
+
+top10.aggr.prt.mkt <- aggr.prt.mkt[aggr.prt.mkt$partner_id %in% top10.prt,]
+
+top10stats <- ddply(top10.aggr.prt.mkt,.(partner_id),function(df){
+  df <- arrange(df ,desc(prt_share))
+  df$prt_share <- cumsum(df$prt_share)
+  top_markets <- length(which(df$prt_share<0.8))
+  if(top_markets==0) top_markets <- 1
+  num_markets <- nrow(df)
+  total_prt_bkg_value <- sum(df$tot_prt_mkt_bkg_value)
+  data.frame(num_markets,top_markets,total_prt_bkg_value)
+})
+ggplot(top10stats,aes(x=num_markets,y=top_markets))+geom_point(aes(size=total_prt_bkg_value)) + xlab("# total markets") + ylab("# top markets")
+```
+
+### PART 3. Characterizing markets and partners
+
+
+#### Booking value per partner and market
+
+Figure below shows the average price distribution per partner and market. Distribution is bimodal
+with a peak at 0 and another around 0.25.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.prt.mkt,aes(x=mean_bkg_value)) + geom_histogram()+ xlab("Average booking value per market")
+```
+
+Basic descriptive statistics below:
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+summary(aggr.prt.mkt$mean_bkg_value)
+```
+
+Markets and partners can be characterized based on their volume and booking value.
+I first present an overview of markets and partners together, and then look at individual
+markets by considering a subsample of the data that includes the Top
+20 markets and the Top 10 partners alone.
+
+#### Partners' and Markets' volume vs booking value
+
+Figures below show the the volume and booking value for partners and markets.
+Partners and markets that sell over the average booking of 0.26 are both interesting
+opportunties for Expedia to grow its business.
+
+**Recommendation**: focus on growing markets and partners with low volume and high booking value.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.prt,aes(x=mean_bkg_value,y=num_bkgs)) + geom_point() + xlab("Mean bkg value per partner") + ylab("Num bkgs per partner")
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=4, fig.height=3}
+ggplot(aggr.mkt,aes(x=mean_bkg_value,y=num_bkgs)) + geom_point() + xlab("Mean bkg value per market") + ylab("Num bkgs per market")
+```
+
+#### Top 10's partners volume and booking value for the Top 20 markets
+
+Figure belows shows the volume and booking value of the top 10 partners
+in each of the top 20 markets. It can be seen that both differences
+in volume and booking value exist within each market.
+
+As shown in the figure, we can identify opportunities for growth.
+According to each market's booking value average,
+we can divide partners between those with higher and lower booking value.
+According to the overall volume, we can divide partners between
+those that generate higher volume and low volume.
+
+* partners in the low volume, higher value segment represent opportunities to grow in volume.
+
+* partners in the high volume, higher value segment represent opportunities to grow in volume
+(and maybe value).
+
+* partners with low volume, low value can be helped to grow to higher values.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=11, fig.height=7}
+top20.mkts <- arrange(aggr.mkt,desc(tot_mkt_bkg_value))$mkt[seq(20)]
+top10.prts <- arrange(aggr.prt,desc(tot_prt_bkg_value))$partner_id[seq(10)]
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=11, fig.height=7}
+sel.aggr.prt.mkt <- aggr.prt.mkt[aggr.prt.mkt$mkt %in% top20.mkts,]
+sel.aggr.prt.mkt <- sel.aggr.prt.mkt[sel.aggr.prt.mkt$partner_id %in% top10.prts,]
+ggplot(sel.aggr.prt.mkt,aes(x=mean_bkg_value,y=num_bkgs))+geom_point(aes(color=partner_id)) + xlab("mean_bkg_value") + ylab("num_bkgs")+facet_wrap(~mkt)
+```
+
+#### Top 20 markets volume and booking for the Top 10 partners
+
+Figure belows shows the volume and booking value in each of the 20 markets
+for each of the top 10 partners.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=11, fig.height=7}
+ggplot(sel.aggr.prt.mkt,aes(x=mean_bkg_value,y=num_bkgs))+geom_point(aes(color=mkt)) + xlab("mean_bkg_value") + ylab("num_bkgs")+facet_wrap(~partner_id)
+```
