@@ -2,11 +2,13 @@
 
 **Q1**
 
-Code is in
+Code is in :
+preproc_aggregates.R (to preprocess some data)
+analysis_expedia_case_study.Rmd
 
-To the *.Rdm file use:
+To the *.Rdm file type the following line in your R console:
 
-*rmarkdown::run("analysis_expedia_markets.Rmd", shiny_args = list(port = 8080))*
+*rmarkdown::run("analysis_expedia_case_study.Rmd", shiny_args = list(port = 8080))*
 
 
 **Q2**
